@@ -332,7 +332,13 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
                     dirname = dlg.GetDirectory()
                     filePath = str(os.path.join(dirname, filename))
                     print(self.sql.getCategories())
-                    self.sql.downloadAttachment(hash, file, filePath)
+                    data = self.sql.downloadAttachment(hash, file)
+
+                    if data is not None:
+                       with open(filePath, 'wb') as fp:
+                           fp.write(data)
+                    # else error message? Normally, should not occur.
+
                 dlg.Destroy()
             except Exception as e:
                 print("Could not save the file: " + str(e))

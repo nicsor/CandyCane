@@ -15,17 +15,19 @@ class Eml():
     def __init__(self, data):
         self.message = BytesParser(policy=policy.default).parsebytes(data)
 
-    def getKeys(self):
-        print(self.message.keys())
+    def getProperties(self):
+        data = {}
         for item in self.message.keys():
-            print(str(item) + ": " + str(self.message[item]))
+            data[item] = self.message[item]
+
+        return json.dumps(data)
 
     def extractEmails(self, text):
         emails = re.findall('([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)', text)
         emails = list(dict.fromkeys(emails)) # remove duplicates
         return emails
 
-    def downloadAttachment(self, name, targetName):
+    def getAttachmentData(self, name):
         for part in self.message.walk():
             if 'content-disposition' not in part:
                 continue
@@ -47,14 +49,12 @@ class Eml():
                        val = val.strip("'")
 
                    if (name == val):
-                       with open(targetName, 'wb') as fp:
-                           data = part.get_payload(decode=True)
-                           fp.write(data)
+                       return part.get_payload(decode=True)
 
-                       return
+        return None
 
     def getAttachmentNames(self):
-        found = ""
+        found = []
 
         for part in self.message.walk():
             if 'content-disposition' not in part:
@@ -76,10 +76,7 @@ class Eml():
                    elif val.startswith("'"):
                        val = val.strip("'")
 
-                   if found != "":
-                       found = found + ","
-
-                   found = found + val
+                   found.append(val)
 
         return found
 
@@ -113,12 +110,6 @@ class Sql():
 
         with self.connection:
             self.connection.execute(
-                'CREATE TABLE IF NOT EXISTS raw_data(      \
-                    id   VARCHAR(40) NOT NULL PRIMARY KEY, \
-                    meta BLOB,                             \
-                    data BLOB        NOT NULL)')
-
-            self.connection.execute(
                 'CREATE TABLE IF NOT EXISTS processed(            \
                     id          VARCHAR(40) NOT NULL PRIMARY KEY, \
                     sender      TEXT,                   \
@@ -128,7 +119,16 @@ class Sql():
                     body_html   TEXT,                   \
                     body_plain  TEXT,                   \
                     path        TEXT,                   \
-                    attachments TEXT)')
+                    attachments TEXT,                   \
+                    properties  TEXT,                   \
+                    meta        TEXT)')
+
+            self.connection.execute(
+                'CREATE TABLE IF NOT EXISTS attachments(\
+                    emailId     VARCHAR(40),            \
+                    name        TEXT,                   \
+                    data        TEXT,                   \
+                    PRIMARY KEY (emailId, name))')
 
     def __del__(self):
         self.connection.commit()
@@ -161,10 +161,6 @@ class Sql():
 
         try:
             with self.connection:
-                dataTuple = (emlHash, meta, eml)
-
-                self.connection.execute('INSERT INTO raw_data VALUES (?, ?, ?)', dataTuple)
-
                 emlParser = Eml(eml)
 
                 receivers   = ','.join(emlParser.extractEmails(emlParser.getReceivers()))
@@ -175,15 +171,23 @@ class Sql():
                 plain       = emlParser.getPayloadPlain()
                 attachments = emlParser.getAttachmentNames()
                 path = ""
+                properties  = emlParser.getProperties()
+                metaInfo    = {}
+
+                for attachment in attachments:
+                    data = emlParser.getAttachmentData(attachment)
+
+                    dataTuple = (emlHash, attachment, data)
+                    self.connection.execute('INSERT INTO attachments VALUES (?, ?, ?)', dataTuple)
 
                 if meta != "":
-                    jsonData = json.loads(meta.decode("utf-8"))
+                    metaInfo = json.loads(meta.decode("utf-8"))
 
-                    if "Path" in jsonData:
-                        path = jsonData["Path"]
+                    if "Path" in metaInfo:
+                        path = metaInfo["Path"]
 
-                dataTuple = (emlHash, sender, receivers, subject, date, html, plain, path, attachments)
-                self.connection.execute('INSERT INTO processed VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', dataTuple)
+                dataTuple = (emlHash, sender, receivers, subject, date, html, plain, path, ','.join(attachments), str(properties), str(metaInfo))
+                self.connection.execute('INSERT INTO processed VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', dataTuple)
 
         #except (sqlite3.OperationalError, sqlite3.IntegrityError) as e:
         except Exception as e:
@@ -289,13 +293,14 @@ class Sql():
                 return []
             return row[0].split(',')
 
-    def downloadAttachment(self, entryId, name, targetName):
-        query = "SELECT data FROM raw_data where id = '" + str(entryId) + "'"
+    def downloadAttachment(self, entryId, name):
+        query = "SELECT data FROM attachments where emailId = '" + str(entryId) + "' and name = '" + name + "'"
 
         self.connection.row_factory = None
         for row in self.connection.execute(query):
-            emlParser = Eml(row[0])
-            emlParser.downloadAttachment(name, targetName)
+            return row[0]
+
+        return None
 
 if __name__ == '__main__':
     #sql = Sql("database.db")
@@ -307,7 +312,7 @@ if __name__ == '__main__':
         emlData = file.read()
 
     eml = Eml(emlData)
-    eml.getKeys()
+    eml.getProperties()
 
 
     #sql.downloadAttachment('31a454320a46d0ca8f13a3cd13d364a5f71e2e49', 'xpact quiz.docx', '1.docx')
