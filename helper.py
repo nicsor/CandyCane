@@ -249,7 +249,6 @@ class Sql():
     def _addEntry(self, message, metaInfo):
         with self.connection:
             emlHash     = str(message.getId())
-            print(emlHash)
             receivers   = ','.join(message.extractEmails(message.getReceivers()))
             sender      = ','.join(message.extractEmails(message.getSender()))
             subject     = message.getSubject()
@@ -259,13 +258,10 @@ class Sql():
             attachments = message.getAttachmentNames()
             path = ""
             properties  = message.getProperties()
-            metaInfo    = {}
 
-            print("emlHash: " + emlHash)
             for attachment in attachments:
                 data = message.getAttachmentData(attachment)
 
-                print("atasament: " + attachment)
                 dataTuple = (emlHash, attachment, data)
                 self.connection.execute('INSERT INTO attachments VALUES (?, ?, ?)', dataTuple)
 
@@ -297,10 +293,7 @@ class Sql():
             messages = mbox(fileName)
             base     = os.path.basename(fileName)
             metaPath = ('.').join(base.split('.')[:-1])
-            print(metaPath)
-            meta     = '{"Path":"' + metaPath + '"}'
-            print(meta)
-            print(str(json.loads(meta)))
+            meta     = '{"Path":"/MailBox/' + metaPath + '"}'
 
             for message in messages:
                 msg = MailBoxEml(message)
@@ -395,13 +388,9 @@ class Sql():
         query = "SELECT body_html, body_plain FROM processed where id = '" + str(entryId) + "'"
 
         for row in self.connection.execute(query):
-            html = row[0]
+            return (row[0], row[1])
 
-            # Try to use html text
-            if html == "":
-                html = row[1]
-
-            return html
+        return None
 
     def getAttachements(self, entryId):
         query = "SELECT attachments FROM processed where id = '" + str(entryId) + "'"

@@ -90,7 +90,13 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
         self.Bind(wx.EVT_LIST_ITEM_SELECTED, self.onMessageSelected, self.ctrl_messages_list)
 
         # Message body
-        self.ctrl_message_content = wx.html2.WebView.New(self.layout_msg_body_pane, id=wx.ID_ANY)
+        self.ctrl_message_view = wx.Notebook(self.layout_msg_body_pane, wx.ID_ANY, style=wx.NB_BOTTOM)
+        self.ctrl_message_view_html = wx.Panel(self.ctrl_message_view, wx.ID_ANY)
+        self.ctrl_message_view_plain = wx.Panel(self.ctrl_message_view, wx.ID_ANY)
+        self.ctrl_message_view_code = wx.Panel(self.ctrl_message_view, wx.ID_ANY)
+        self.ctrl_message_content = wx.html2.WebView.New(self.ctrl_message_view_html, id=wx.ID_ANY)
+        self.ctrl_message_content_plain = wx.TextCtrl(self.ctrl_message_view_plain, id=wx.ID_ANY, style=wx.TE_MULTILINE)
+        self.ctrl_message_content_code = wx.TextCtrl(self.ctrl_message_view_code, id=wx.ID_ANY, style=wx.TE_MULTILINE)
         #self.ctrl_message_content = wx.html.HtmlWindow(self.layout_msg_body_pane, id=wx.ID_ANY)
 
         # Attachments panel
@@ -205,8 +211,24 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
         self.layout_msg_list_pane.SetSizer(sizer)
 
         # Message body pane
-        sizer = wx.BoxSizer(wx.HORIZONTAL)
-        sizer.Add(self.ctrl_message_content, 1, wx.EXPAND, 0)
+        sizer       = wx.BoxSizer(wx.HORIZONTAL)
+        sizer_html  = wx.BoxSizer(wx.HORIZONTAL)
+        sizer_plain = wx.BoxSizer(wx.HORIZONTAL)
+        sizer_code  = wx.BoxSizer(wx.HORIZONTAL)
+
+        sizer_html.Add(self.ctrl_message_content, 1, wx.EXPAND, 0)
+        sizer_plain.Add(self.ctrl_message_content_plain, 1, wx.EXPAND, 0)
+        sizer_code.Add(self.ctrl_message_content_code, 1, wx.EXPAND, 0)
+
+        self.ctrl_message_view_html.SetSizer(sizer_html)
+        self.ctrl_message_view_plain.SetSizer(sizer_plain)
+        self.ctrl_message_view_code.SetSizer(sizer_code)
+
+        self.ctrl_message_view.AddPage(self.ctrl_message_view_html,  "HTML")
+        self.ctrl_message_view.AddPage(self.ctrl_message_view_plain, "Plain")
+        self.ctrl_message_view.AddPage(self.ctrl_message_view_code,  "Code")
+
+        sizer.Add(self.ctrl_message_view, 1, wx.EXPAND, 0)
         self.layout_msg_body_pane.SetSizer(sizer)
 
         # Attachements pane
@@ -269,15 +291,17 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
     def onMessageSelected(self, event):
         hash = self.ctrl_messages_list.GetItem(event.GetIndex(), 0).GetText()
         #html = str(self.sql.getContent(hash)).encode('latin-1')
-        html = self.sql.getContent(hash)
+        html, plain = self.sql.getContent(hash)
 
         # Load the selected page
         try:
             self.ctrl_message_content.SetPage(html, "")
+            self.ctrl_message_content_plain.SetValue(plain)
+            self.ctrl_message_content_code.SetValue(html)
         except:
-            print("Problem interpreting charset. Lazy workaround: Trying latin-1")
-            html = html.decode('latin-1')
-            self.ctrl_message_content.SetPage(html, "")
+            self.ctrl_message_content.SetPage("Problem while loading content", "")
+            self.ctrl_message_content_plain.SetValue("Problem while loading content")
+            self.ctrl_message_content_code.SetValue("Problem while loading content")
 
         attachments = self.sql.getAttachements(hash)
         self.setAttachments(attachments)
