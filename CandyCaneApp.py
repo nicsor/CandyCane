@@ -36,10 +36,12 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
         self.Bind(wx.EVT_MENU, self.OnLoadDatabase, menu_it_file_load_db)
 
         # Import menu item
-        menu_it_import = wx.Menu()
-        menu_it_import_eml = menu_it_import.Append(wx.ID_ANY, "EML", "E-mail")
+        menu_it_import      = wx.Menu()
+        menu_it_import_eml  = menu_it_import.Append(wx.ID_ANY, "EML (Zimbra)", "E-mail")
+        menu_it_import_mbox = menu_it_import.Append(wx.ID_ANY, "Mbox (Gmail)", "E-mail")
         menu_bar.Append(menu_it_import, "Import")
-        self.Bind(wx.EVT_MENU, self.OnImportEml, menu_it_import_eml)
+        self.Bind(wx.EVT_MENU, self.OnImportEml,  menu_it_import_eml)
+        self.Bind(wx.EVT_MENU, self.OnImportMbox, menu_it_import_mbox)
 
         # Finish setting up the menu bar
         self.SetMenuBar(menu_bar)
@@ -116,9 +118,7 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
         print("OnExportEml")
         self.Close()
 
-    def OnImportEml(self, e):
-        print("OnImportEml")
-
+    def _import_folder_dialog(self, fileType):
         dirname = ""
         dlg = wx.DirDialog(self, message="Choose emails folder")
  
@@ -126,16 +126,25 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
             dirname = dlg.GetPath()
             print(dirname)
 
-            for path in pathlib.Path(dirname).rglob('*.eml'):
+            for path in pathlib.Path(dirname).rglob('*.' + fileType):
                 emailFile = str(path)
-                emailFileMeta = emailFile + ".meta"
 
-                self.sql.addEMLEntry(emailFile, emailFileMeta)
+                self.sql.addEntry(fileType, emailFile)
 
             print("Done parsing: " + str(dirname))
             self.OnDatabseUpdate()
 
         dlg.Destroy()
+
+    def OnImportEml(self, e):
+        print("OnImportEml")
+
+        self._import_folder_dialog("eml")
+
+    def OnImportMbox(self, e):
+        print("OnImportMbox")
+
+        self._import_folder_dialog("mbox")
 
     def OnLoadDatabase(self, e):
         print("OnLoadDatabase")

@@ -1,19 +1,31 @@
 #!/usr/bin/python3
 
+from mailbox import mbox
 from email import policy
+from email.header import Header, decode_header
 from email.parser import BytesParser
 
 from dateutil.parser import parse
 
+import pickle
 import pathlib
 import hashlib
 import sqlite3
 import json
 import re
+import os
 
-class Eml():
+class EmailBase():
     def __init__(self, data):
-        self.message = BytesParser(policy=policy.default).parsebytes(data)
+        self.message = data
+        self.body_html = ""
+        self.body_plain = ""
+        self._update_payload(self.message)
+
+    def getId(self):
+        h = hashlib.sha1()
+        h.update(pickle.dumps(self.message))
+        return h.hexdigest()
 
     def getProperties(self):
         data = {}
@@ -26,6 +38,63 @@ class Eml():
         emails = re.findall('([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)', text)
         emails = list(dict.fromkeys(emails)) # remove duplicates
         return emails
+
+    def getAttachmentData(self, name):
+        raise Exception('Not implemented')
+
+    def getAttachmentNames(self):
+        raise Exception('Not implemented')
+
+    def getPayloadHtml(self):
+        return self.body_html
+
+    def getPayloadPlain(self):
+        return self.body_plain
+
+    def getSender(self):
+        return str(self.message["from"])
+
+    def getReceivers(self):
+        return str(self.message["to"])
+
+    def getSubject(self):
+        return self._decode_entry(self.message["Subject"])
+
+    def getDate(self):
+        dt = parse(self.message["Date"])
+        return str(dt.date()) + " " + str(dt.time())
+
+    def _update_payload(self, message):
+        raise Exception('Not implemented')
+
+    def _decode_entry(self, entry):
+        if entry is None:
+            entry = ""
+        else:
+            result = ''
+            for part in decode_header(entry):
+                if isinstance(part[0], str):
+                    result += part[0]
+                else:
+                    encoding = part[1]
+                    result += part[0].decode(encoding)
+
+            entry = result
+
+        return entry
+
+    def _decode_body(self, entry):
+        try:
+            entry = entry.decode('utf-8')
+        except UnicodeDecodeError:
+            entry = entry.decode('latin-1')
+
+        return entry
+
+
+class Eml(EmailBase):
+    def __init__(self, data):
+        super(Eml, self).__init__(data)
 
     def getAttachmentData(self, name):
         for part in self.message.walk():
@@ -80,28 +149,55 @@ class Eml():
 
         return found
 
-    def getPayloadHtml(self):
+    def _update_payload(self, message):
         if (self.message.get_body('html') != None):
-            return self.message.get_body('html').get_payload(decode=True)#.decode('latin-1')
-        return ""
+            self.body_html = self._decode_body(self.message.get_body('html').get_payload(decode=True))
 
-    def getPayloadPlain(self):
         if (self.message.get_body('plain') != None):
-            return self.message.get_body('plain').get_payload(decode=True)#.decode('latin-1')
-        return ""
+            self.body_plain = self._decode_body(self.message.get_body('plain').get_payload(decode=True))
 
-    def getSender(self):
-        return str(self.message["from"])
+class MailBoxEml(EmailBase):
+    def __init__(self, data):
+        super(MailBoxEml, self).__init__(data)
 
-    def getReceivers(self):
-        return str(self.message["to"])
+    def getAttachmentData(self, name):
+        for part in self.message.get_payload():
+            if str(part.get_filename()) == 'None':
+                continue
 
-    def getSubject(self):
-        return str(self.message["Subject"])
+            foundName = self._decode_entry(part.get_filename())
+            if foundName != name:
+                continue
 
-    def getDate(self):
-        dt = parse(self.message["Date"])
-        return str(dt.date()) + " " + str(dt.time())
+            return part.get_payload(decode=True)
+
+        return None
+
+    def getAttachmentNames(self):
+        found = []
+
+        for part in self.message.get_payload():
+            if str(part.get_filename()) == 'None':
+                continue
+
+            found.append(self._decode_entry(part.get_filename()))
+
+        return found
+
+    def _update_payload(self, message):
+        if message.is_multipart():
+            for part in message.get_payload():
+                self._update_payload(part)
+        else:
+            contentType = message.get_content_type()
+
+            if ('text/plain' in contentType) or ('text/html' in contentType):
+                body = self._decode_body(message.get_payload(decode=True))
+
+                if 'text/html' in contentType:
+                    self.body_html = body
+                else:
+                    self.body_plain = body
 
 
 class Sql():
@@ -150,49 +246,71 @@ class Sql():
         h.update(data)
         return h.hexdigest()
 
-    def addEMLEntry(self, emlFile, metaFile = ''):
-        meta = ""
-        eml = self.readFile(emlFile)
+    def _addEntry(self, message, metaInfo):
+        with self.connection:
+            emlHash     = str(message.getId())
+            print(emlHash)
+            receivers   = ','.join(message.extractEmails(message.getReceivers()))
+            sender      = ','.join(message.extractEmails(message.getSender()))
+            subject     = message.getSubject()
+            date        = message.getDate()
+            html        = message.getPayloadHtml()
+            plain       = message.getPayloadPlain()
+            attachments = message.getAttachmentNames()
+            path = ""
+            properties  = message.getProperties()
+            metaInfo    = {}
 
-        if metaFile != "" and pathlib.Path(metaFile).exists():
-            meta = self.readFile(metaFile)
+            print("emlHash: " + emlHash)
+            for attachment in attachments:
+                data = message.getAttachmentData(attachment)
 
-        emlHash = self.getHash(eml)
+                print("atasament: " + attachment)
+                dataTuple = (emlHash, attachment, data)
+                self.connection.execute('INSERT INTO attachments VALUES (?, ?, ?)', dataTuple)
 
-        try:
-            with self.connection:
-                emlParser = Eml(eml)
+            if "Path" in metaInfo:
+                path = metaInfo["Path"]
 
-                receivers   = ','.join(emlParser.extractEmails(emlParser.getReceivers()))
-                sender      = ','.join(emlParser.extractEmails(emlParser.getSender()))
-                subject     = emlParser.getSubject()
-                date        = emlParser.getDate()
-                html        = emlParser.getPayloadHtml()
-                plain       = emlParser.getPayloadPlain()
-                attachments = emlParser.getAttachmentNames()
-                path = ""
-                properties  = emlParser.getProperties()
-                metaInfo    = {}
+            dataTuple = (emlHash, sender, receivers, subject, date, html, plain, path, ','.join(attachments), str(properties), str(metaInfo))
+            self.connection.execute('INSERT INTO processed VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', dataTuple)
 
-                for attachment in attachments:
-                    data = emlParser.getAttachmentData(attachment)
+    def addEntry(self, emailType, fileName):
+        meta = "{}"
 
-                    dataTuple = (emlHash, attachment, data)
-                    self.connection.execute('INSERT INTO attachments VALUES (?, ?, ?)', dataTuple)
+        if emailType == "eml":
+            eml = BytesParser(policy=policy.default).parsebytes(self.readFile(fileName))
+            msg = Eml(eml)
+            # We assume there might be a meta file associated with the current input
+            metaFile = fileName + ".meta"
 
-                if meta != "":
-                    metaInfo = json.loads(meta.decode("utf-8"))
+            if pathlib.Path(metaFile).exists():
+                meta = self.readFile(metaFile)
 
-                    if "Path" in metaInfo:
-                        path = metaInfo["Path"]
+            try:
+                self._addEntry(msg, json.loads(meta))
+            except Exception as e:
+                print("Problem while processing file=[{0:s}], meta=[{1:s}], \
+                       SKIPPED: {2:s}".format(fileName, emailType, str(e)))
 
-                dataTuple = (emlHash, sender, receivers, subject, date, html, plain, path, ','.join(attachments), str(properties), str(metaInfo))
-                self.connection.execute('INSERT INTO processed VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', dataTuple)
+        elif emailType == "mbox":
+            messages = mbox(fileName)
+            base     = os.path.basename(fileName)
+            metaPath = ('.').join(base.split('.')[:-1])
+            print(metaPath)
+            meta     = '{"Path":"' + metaPath + '"}'
+            print(meta)
+            print(str(json.loads(meta)))
 
-        #except (sqlite3.OperationalError, sqlite3.IntegrityError) as e:
-        except Exception as e:
-            print("Problem while processing eml=[{0:s}], meta=[{1:s}], id=[{2:s}] \
-                       SKIPPED: {3:s}".format(emlFile, metaFile, emlHash, str(e)))
+            for message in messages:
+                msg = MailBoxEml(message)
+                try:
+                    self._addEntry(msg, json.loads(meta))
+                except Exception as e:
+                    print("Problem while processing file=[{0:s}], meta=[{1:s}], \
+                           SKIPPED: {2:s}".format(fileName, emailType, str(e)))
+        else:
+            raise Exception('Not implemented')
 
     def __dictionary_factory(self, cursor, row):
         dictionary = {}
