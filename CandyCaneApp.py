@@ -298,6 +298,13 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
             self.ctrl_message_content.SetPage(html, "")
             self.ctrl_message_content_plain.SetValue(plain)
             self.ctrl_message_content_code.SetValue(html)
+
+            if html.strip() == "":
+                if (self.ctrl_message_view.GetSelection() == 0):
+                    self.ctrl_message_view.SetSelection(1)
+            elif (self.ctrl_message_view.GetSelection() != 0):
+                self.ctrl_message_view.SetSelection(0)
+
         except:
             self.ctrl_message_content.SetPage("Problem while loading content", "")
             self.ctrl_message_content_plain.SetValue("Problem while loading content")
