@@ -310,7 +310,7 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
             self.ctrl_message_content_plain.SetValue("Problem while loading content")
             self.ctrl_message_content_code.SetValue("Problem while loading content")
 
-        attachments = self.sql.getAttachements(hash)
+        attachments = self.sql.getAttachementNames(hash)
         self.setAttachments(attachments)
 
         event.Skip()
@@ -372,7 +372,7 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
                     dirname = dlg.GetDirectory()
                     filePath = str(os.path.join(dirname, filename))
                     print(self.sql.getCategories())
-                    data = self.sql.downloadAttachment(hash, file)
+                    data = self.sql.getAttachmentData(hash, file)
 
                     if data is not None:
                        with open(filePath, 'wb') as fp:

@@ -15,12 +15,16 @@ import json
 import re
 import os
 
+
 class EmailBase():
     def __init__(self, data):
         self.message = data
         self.body_html = ""
         self.body_plain = ""
         self._update_payload(self.message)
+
+    def isConversation(self):
+        return False
 
     def getId(self):
         h = hashlib.sha1()
@@ -160,6 +164,13 @@ class MailBoxEml(EmailBase):
     def __init__(self, data):
         super(MailBoxEml, self).__init__(data)
 
+    def isConversation(self):
+        if "X-Gmail-Labels" in self.message.keys():
+            if "Chat" in self.message["X-Gmail-Labels"].split(","):
+                return True
+
+        return False
+
     def getAttachmentData(self, name):
         for part in self.message.get_payload():
             if str(part.get_filename()) == 'None':
@@ -248,6 +259,10 @@ class Sql():
 
     def _addEntry(self, message, metaInfo):
         with self.connection:
+            # Skip conversations
+            if message.isConversation():
+                return
+
             emlHash     = str(message.getId())
             receivers   = ','.join(message.extractEmails(message.getReceivers()))
             sender      = ','.join(message.extractEmails(message.getSender()))
@@ -392,7 +407,7 @@ class Sql():
 
         return None
 
-    def getAttachements(self, entryId):
+    def getAttachementNames(self, entryId):
         query = "SELECT attachments FROM processed where id = '" + str(entryId) + "'"
 
         for row in self.connection.execute(query):
@@ -400,7 +415,7 @@ class Sql():
                 return []
             return row[0].split(',')
 
-    def downloadAttachment(self, entryId, name):
+    def getAttachmentData(self, entryId, name):
         query = "SELECT data FROM attachments where emailId = '" + str(entryId) + "' and name = '" + name + "'"
 
         self.connection.row_factory = None
