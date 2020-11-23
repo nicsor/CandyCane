@@ -12,14 +12,15 @@ import signal
 import hashlib
 import pathlib
 
-from helper import Sql
+from database import Database
+from Parser import parseEmailFolder
 
 class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
     def __init__(self, *args, **kwds):
         wx.Frame.__init__(self, *args, **kwds)
 
         # Open the database in memory by default
-        self.sql = Sql("database.db")
+        self.database = Database("database.db")
         self.current_path = ""
         self.itemDataMap = {}
   
@@ -130,14 +131,9 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
  
         if dlg.ShowModal() == wx.ID_OK:
             dirname = dlg.GetPath()
-            print(dirname)
-
-            for path in pathlib.Path(dirname).rglob('*.' + fileType):
-                emailFile = str(path)
-
-                self.sql.addEntry(fileType, emailFile)
-
+            parseEmailFolder(self.database, dirname, fileType)
             print("Done parsing: " + str(dirname))
+
             self.OnDatabseUpdate()
 
         dlg.Destroy()
@@ -161,7 +157,7 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
                 filename = dlg.GetFilename()
                 dirname = dlg.GetDirectory()
                 file = os.path.join(dirname, filename)
-                self.sql = Sql(str(file))
+                self.database = Database(str(file))
 
                 self.OnDatabseUpdate()
 
@@ -179,7 +175,7 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
                 filename = dlg.GetFilename()
                 dirname = dlg.GetDirectory()
                 filePath = str(os.path.join(dirname, filename))
-                self.sql.saveToFile(filePath)
+                self.database.saveToFile(filePath)
             dlg.Destroy()
         except Exception as e:
             print("Could not save the database: " + str(e))
@@ -290,8 +286,7 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
  
     def onMessageSelected(self, event):
         hash = self.ctrl_messages_list.GetItem(event.GetIndex(), 0).GetText()
-        #html = str(self.sql.getContent(hash)).encode('latin-1')
-        html, plain = self.sql.getContent(hash)
+        html, plain = self.database.getContent(hash)
 
         # Load the selected page
         try:
@@ -310,7 +305,7 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
             self.ctrl_message_content_plain.SetValue("Problem while loading content")
             self.ctrl_message_content_code.SetValue("Problem while loading content")
 
-        attachments = self.sql.getAttachementNames(hash)
+        attachments = self.database.getAttachementNames(hash)
         self.setAttachments(attachments)
 
         event.Skip()
@@ -371,8 +366,7 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
                     filename = dlg.GetFilename()
                     dirname = dlg.GetDirectory()
                     filePath = str(os.path.join(dirname, filename))
-                    print(self.sql.getCategories())
-                    data = self.sql.getAttachmentData(hash, file)
+                    data = self.database.getAttachmentData(hash, file)
 
                     if data is not None:
                        with open(filePath, 'wb') as fp:
@@ -432,11 +426,11 @@ class MyFrame(wx.Frame, wx.lib.mixins.listctrl.ColumnSorterMixin):
     def OnDatabseUpdate(self, skipCategories = False):
         if not skipCategories:
            # We won't filter categories, although we could
-           self.onCategoriesUpdate(self.sql.getCategories())
+           self.onCategoriesUpdate(self.database.getCategories())
         self.onMessageListUpdate(
-           self.sql.getEnries(
-               path = self.current_path,
-               receivers = self.txt_filter_receivers.GetValue(),
+           self.database.getMessages(
+               category = self.current_path,
+               recipients = self.txt_filter_receivers.GetValue(),
                sender = self.txt_filter_sender.GetValue(),
                subject = self.txt_filter_subject.GetValue(),
                content = self.txt_filter_content.GetValue()))
